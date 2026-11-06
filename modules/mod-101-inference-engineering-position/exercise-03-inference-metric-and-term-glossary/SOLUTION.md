@@ -41,7 +41,7 @@ Each entry uses this schema (from the exercise spec):
 **TPOT (Time Per Output Token)**
 
 1. Term: TPOT (synonyms: "per-token latency", "average decode-step latency")
-2. Definition: Average wall-clock time to generate one output token after the first, measured as total decode time divided by output-token count per request.
+2. Definition: Average wall-clock time to generate one output token after the first, measured as the time between the first and last output tokens divided by `N − 1` for a request producing `N` output tokens (the first token is excluded so the denominator counts only decode intervals, not the prefill-dominated first token).
 3. Unit: milliseconds per token (ms/token); reported P50 / P99.
 4. Dominated by: decode-phase compute, batch size, memory bandwidth, and speculative-decoding acceptance rate.
 5. Engine primitive: per-token iteration in the continuous-batching loop (vLLM's `Scheduler`, SGLang's batch scheduler, TRT-LLM's in-flight batching).

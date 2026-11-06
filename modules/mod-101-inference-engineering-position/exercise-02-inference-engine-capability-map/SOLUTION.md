@@ -87,7 +87,7 @@ Each of these is a legitimate cell edit: *the chapter is a point-in-time orienta
 ## 5. Common mistakes
 
 - **Copying Chapter 02 claims into cells as if they were current.** The chapter is a point-in-time orientation. Every cell must trace to an engine's release notes or docs page, or be marked `verify`.
-- **Collapsing "supported on hardware H" into "supported."** FP8 on vLLM is supported *on Hopper and newer*. An L4 fleet does not get hardware FP8 even if the engine lists FP8.
+- **Collapsing "supported on hardware H" into "supported."** Hardware FP8 Tensor Cores land on Ada (L4, L40S) and Hopper (H100, H200) and newer; Ampere (A100, A10) and older do not have FP8 Tensor Cores and fall back to emulation or a different precision. An A100 fleet does not get hardware FP8 even if the engine lists FP8; an L4 or L40S fleet does.
 - **Missing the TGI maintenance-status gap.** Many learners carry TGI capability claims from memory. Mark the column `verify` end-to-end until an up-to-date announcement is cited.
 - **Vendor row that describes the vendor instead of giving a threshold.** "Groq is a fast inference provider" is not a build-vs-buy threshold.
 - **Picking the engine from vibes in Artefact C.** The pick must reference specific axes from the spreadsheet. If the rationale does not cite numbered axes, rewrite.
