@@ -37,7 +37,7 @@ Legend: **first-class** (documented, GA, tested by the project) / **supported** 
 
 1. **vLLM × Quantization (FP4/NVFP4)** — Chapter 02 says FP4/NVFP4 is supported on Blackwell+; we mark `verify` because the exact release is a moving target and must be confirmed against vLLM release notes before a fleet commits to it. Reason: the chapter lands at a point in time; the release that first ships hardware FP4 may trail the Blackwell GA date in engine-land.
 2. **vLLM × Speculative decoding** — Chapter 02 names draft-target, n-gram, and EAGLE. Medusa and Lookahead status is flagged as `verify` here rather than filled from the chapter. Reason: speculative-decoding offerings in vLLM have historically rotated.
-3. **TGI × every axis** — Chapter 02 does not describe TGI in detail and `CURRICULUM.md` references a 2026 archival signal that itself requires verification. The TGI column is `verify` across the board with a single `<!-- verify-source: current maintenance status --> ` marker. Reason: the chapter cannot vouch for a project's current state.
+3. **TGI × every axis** — Chapter 02 does not describe TGI in detail and `CURRICULUM.md` references a 2026 archival signal that itself requires verification. The TGI column is `verify` across the board with a single `<!-- verify-source: current maintenance status -->` marker. Reason: the chapter cannot vouch for a project's current state.
 4. **Triton Inference Server × KV-cache / attention / parallelism** — Chapter 02 is silent on the LLM-specific internals because Triton routes to backends. We mark these `verify` rather than inferring.
 5. **llama.cpp × Prefix caching** — Chapter 02 does not assert a specific allocator status for prefix caching in llama.cpp; we mark `verify` rather than extending the chapter.
 
