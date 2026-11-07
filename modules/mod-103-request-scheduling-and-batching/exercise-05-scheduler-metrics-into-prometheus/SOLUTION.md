@@ -5,6 +5,7 @@
 This exercise lands the observability bundle for the scheduler: a running Prometheus scraping the engine, five dashboards covering the five SLO axes, five alert rules, and — critically — a verification log that *each alert has actually been provoked and seen to fire*. An un-provoked alert is an un-trusted alert.
 
 Metric names below are the vLLM-shaped names used in chapter 05. **Verify the exact spellings against your pinned engine release's `/metrics` output** — vLLM has renamed and reshaped metrics multiple times across releases, and the precise set depends on whether the engine was launched with the V0 or V1 engine core.
+
 ---
 
 ## 1. Solution overview
@@ -132,7 +133,7 @@ Metric names below use the vLLM-shaped spelling. For SGLang / TRT-LLM substitute
 |---|---|
 | Queue depth over time | `vllm:num_requests_waiting` |
 | Arrival vs. admission rate | `rate(vllm:request_prompt_tokens_sum[1m])` vs. `rate(vllm:request_generation_tokens_sum[1m])` (or arrival counter if exposed) |
-| Time-in-queue histogram P50/P95/P99 | `histogram_quantile(0.5|0.95|0.99, sum(rate(vllm:time_in_queue_seconds_bucket[5m])) by (le))` |
+| Time-in-queue histogram P50/P95/P99 | `histogram_quantile(0.5\|0.95\|0.99, sum(rate(vllm:time_in_queue_seconds_bucket[5m])) by (le))` |
 | Request-aborted rate | `rate(vllm:request_error_total[5m])` (or the engine's equivalent counter) |
 
 #### Dashboard 3 — Prefill vs. decode mix
@@ -142,7 +143,7 @@ Metric names below use the vLLM-shaped spelling. For SGLang / TRT-LLM substitute
 | Prefill fraction | `rate(vllm:prompt_tokens_total[1m]) / (rate(vllm:prompt_tokens_total[1m]) + rate(vllm:generation_tokens_total[1m]))` |
 | Chunked-prefill chunk count | counter as exposed by engine; verify |
 | Iteration-tokens-per-step distribution | `histogram_quantile(0.95, sum(rate(vllm:iteration_tokens_bucket[5m])) by (le))` (verify presence) |
-| TPOT P50/P95 | `histogram_quantile(0.5|0.95, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))` |
+| TPOT P50/P95 | `histogram_quantile(0.5\|0.95, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))` |
 
 #### Dashboard 4 — Preemption and KV pressure
 
@@ -157,8 +158,8 @@ Metric names below use the vLLM-shaped spelling. For SGLang / TRT-LLM substitute
 
 | Panel | PromQL |
 |---|---|
-| TTFT P50/P95/P99 | `histogram_quantile(0.5|0.95|0.99, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le))` |
-| TPOT P50/P95/P99 | `histogram_quantile(0.5|0.95|0.99, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))` |
+| TTFT P50/P95/P99 | `histogram_quantile(0.5\|0.95\|0.99, sum(rate(vllm:time_to_first_token_seconds_bucket[5m])) by (le))` |
+| TPOT P50/P95/P99 | `histogram_quantile(0.5\|0.95\|0.99, sum(rate(vllm:time_per_output_token_seconds_bucket[5m])) by (le))` |
 | E2E P95 | `histogram_quantile(0.95, sum(rate(vllm:e2e_request_latency_seconds_bucket[5m])) by (le))` |
 | Request-aborted rate | `rate(vllm:request_error_total[5m])` |
 | SLO compliance | TTFT P95 compared to SLO constant; TPOT P95 compared to SLO constant (two single-stat panels with thresholds) |
