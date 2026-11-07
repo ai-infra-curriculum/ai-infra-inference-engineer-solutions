@@ -41,7 +41,11 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets:
-          - 'localhost:8001'
+          # Prometheus runs inside the compose container; `localhost` from here
+          # would target Prometheus itself. `host.docker.internal` resolves to
+          # the Docker host via the `extra_hosts` line in the compose file
+          # below, which is where the vLLM server is launched.
+          - 'host.docker.internal:8001'
         labels:
           engine: vllm
           pool: chat-prod-us
@@ -56,7 +60,9 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-            - 'localhost:9093'    # optional; omit if Alertmanager is not deployed
+            # Alertmanager is its own compose service; address it by service DNS.
+            # Omit this `alerting:` block entirely if Alertmanager is not deployed.
+            - 'alertmanager:9093'
 ```
 
 `docker-compose.yml` fragment (reference; drop Alertmanager if not needed):
@@ -95,7 +101,7 @@ Engine launch command alongside (reference — vLLM):
 vllm serve meta-llama/Llama-3.1-70B-Instruct \
   --tensor-parallel-size 8 \
   --max-num-seqs 128 \
-  --max-num-batched-tokens 16384 \
+  --max-num-batched-tokens 8192 \
   --enable-chunked-prefill \
   --enable-prefix-caching \
   --swap-space 16 \
@@ -290,7 +296,7 @@ Observation window: 10 min.
 - Alertmanager delivered a webhook with the runbook URL
   https://runbooks.internal/inference/ttft-breach.md — opened, served, HTTP 200.
 
-Reversion: returned `--max-num-batched-tokens=16384` (exercise-02 pinned value).
+Reversion: returned `--max-num-batched-tokens=8192` (exercise-02 pinned value).
 - TTFT P95 fell back to ~980 ms by t=13m.
 - Alert cleared (`firing` → `inactive`) at t=14m30s — within `for: 5m` + a few scrape
   intervals of reversion. Clean resolve.

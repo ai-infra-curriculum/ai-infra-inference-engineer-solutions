@@ -131,9 +131,12 @@ def sample_output_len(rng: random.Random) -> int:
 async def one_request(client: AsyncOpenAI, rng: random.Random, rows: list, model: str):
     prompt_tokens = sample_prompt_len(rng)
     output_tokens = sample_output_len(rng)
-    # "Fill" tokens are synthetic; a corpus of real-shape prompts is better
-    # for prefix-cache fidelity. For the sweep, synthetic is acceptable.
-    prompt = " ".join(["token"] * prompt_tokens)
+    # Randomize each token so prompts do NOT share a long repeated-"token" prefix.
+    # The pinned exercise-02 config enables prefix caching; a shared prefix would
+    # let every request after warmup reuse cached blocks instead of prefilling,
+    # biasing the sweep (and exercise 03's chunked-prefill measurement) toward
+    # artificially low TTFT and prefill cost.
+    prompt = " ".join(f"w{rng.randrange(1_000_000)}" for _ in range(prompt_tokens))
     arrival = time.perf_counter()
     first_token_at = None
     last_token_at = None
@@ -212,7 +215,7 @@ Notes for the learner:
 - The three prompt-length buckets *must* be heterogeneous. A fixed-length benchmark lies about tail latency; the chapter is explicit.
 - The seed must be recorded alongside the sweep run; `git rev-parse HEAD` of the generator must be captured.
 - SSE streaming is non-negotiable. TTFT without streaming is a placebo.
-- The synthetic `" ".join(["token"] * N)` prompt is acceptable for sweep purposes; for prefix-cache experiments (later modules), substitute a corpus-backed generator.
+- The per-token randomization breaks prefix-cache reuse so the sweep measures real prefill cost against prefix caching enabled; for prefix-cache *hit-rate* experiments (later modules), substitute a corpus-backed generator that replays realistic shared-prefix patterns.
 - vLLM's in-tree `benchmarks/benchmark_serving.py` is an acceptable base to extend if preferred; name the script's SHA in the writeup.
 ### 2.4 Artefact D — worked Pareto sweep
 
@@ -242,9 +245,9 @@ For each `(max_num_seqs, max_num_batched_tokens)` cell:
 
 **Plot 2 (TPOT P95 vs. throughput):** scatter the configs, overlay the horizontal line at `TPOT SLO = 50 ms`.
 
-**Worked pick:** `(128, 16384)` sits at TTFT P95 980 ms (35% headroom under 1500) and TPOT P95 41 ms (18% headroom under 50), with 0.3% preempt rate and 86% KV usage max. `(192, 16384)` has more throughput but gives up both headroom axes and pushes preemption past 1%. `(128, 8192)` has more TTFT headroom but throws away ≥ 6% throughput. The Pareto pick is `(128, 16384)`.
+**Worked pick:** `(128, 8192)` sits at TTFT P95 1050 ms (30% headroom under 1500) and TPOT P95 36 ms (28% headroom under 50), with 0.2% preempt rate and 84% KV usage max. `(128, 16384)` and `(192, 16384)` push throughput higher (3100 and 3400 tok/s respectively) but fail the 20% TPOT headroom floor (18% and 4%). `(64, 8192)` has more headroom on both axes but gives up ≥ 30% throughput. The Pareto pick is `(128, 8192)` — the highest-throughput cell that still clears the 20% floor on both SLO axes.
 
-The 20%-headroom rule is a floor, not a ceiling; if the learner's data shows `(128, 8192)` has ≥ 20% on both axes with lower preemption and only a few percent throughput loss, that is also a valid pick with a different risk posture (favouring stability over throughput). The reviewer's job is to check the reasoning, not to insist on one cell.
+The 20%-headroom rule is a floor, not a ceiling; a cell with higher headroom and lower preemption at a few percent throughput cost (e.g. `(64, 8192)` here) is also a valid pick with a different risk posture (favouring stability over throughput). The reviewer's job is to check the reasoning against the floor, not to insist on one cell — but a candidate below the floor on either axis must be rejected regardless of its throughput.
 
 ### 2.5 Artefact E — pinned config (worked)
 
@@ -258,7 +261,7 @@ dtype: bfloat16
 tensor_parallel_size: 8
 max_model_len: 16384
 max_num_seqs: 128
-max_num_batched_tokens: 16384
+max_num_batched_tokens: 8192
 enable_chunked_prefill: true
 enable_prefix_caching: true
 swap_space: 16            # GB per worker
@@ -267,10 +270,11 @@ gpu_memory_utilization: 0.92
 # Reasoning
 # ---------
 # - max_num_seqs = 128: Pareto knee for Llama-3.1-70B on 8×H200 under chat-prod-us
-#   (TTFT P95 980 ms vs. 1500 ms SLO, 35% headroom; TPOT P95 41 ms vs. 50 ms
-#   SLO, 18% headroom).
-# - max_num_batched_tokens = 16384: gives the long-prompt tail room to progress
-#   without exhausting KV; preemption rate 0.3% sustained.
+#   (TTFT P95 1050 ms vs. 1500 ms SLO, 30% headroom; TPOT P95 36 ms vs. 50 ms
+#   SLO, 28% headroom — clears the 20% floor on both axes).
+# - max_num_batched_tokens = 8192: highest-throughput sweep cell that still clears
+#   the 20% TPOT headroom floor; preemption rate 0.2% sustained. Larger budgets
+#   (16384, 32768) gain a few percent throughput but fall below the floor.
 # - chunked prefill ON; chunk size to be refined in exercise 03.
 # - swap_space 16GB: sized for 70B KV footprint (see block-manager notes);
 #   re-verified in exercise 04 preemption drill.

@@ -32,11 +32,11 @@ The drill reuses: the engine from [exercise 01](../exercise-01-continuous-batchi
 **Verify flag spellings against the pinned release's docs.**
 | Engine | Enable swap | Force recompute | Metric to confirm mode |
 |---|---|---|---|
-| vLLM | `--swap-space <GB>` sets the CPU swap pool size | Set `--swap-space 0` (or very small) so the allocator falls through | `vllm:num_preemptions_total`, plus swap-in / swap-out counters where exposed |
+| vLLM | `--preemption-mode swap` (and `--swap-space <GB>` for the CPU pool) | `--preemption-mode recompute` (the V0 default per `vllm serve --help` is already recompute, but set it explicitly so the drill isn't at the mercy of release defaults) | `vllm:num_preemptions_total`, plus swap-in / swap-out counters where exposed |
 | SGLang | server-arg for CPU swap space | server-arg for recompute-only | verify via scheduler-manager metrics |
 | TRT-LLM via Triton | `kv_cache_host_memory_bytes` in `config.pbtxt` | Set host memory to 0 | backend metrics |
 
-Verify by watching the metric counters during a provocation run: if swap-out count stays at zero in "swap mode," the engine actually ran recompute.
+Set the policy flag explicitly for each run: for the single-sequence requests the load generator produces, changing only `--swap-space` does *not* select swap vs. recompute — vLLM V0 defaults to recompute regardless of pool size, and the preemption-mode flag is the actual selector. Verify by watching the metric counters during a provocation run: if swap-out count stays at zero in "swap mode," the flag didn't take effect or the pool is undersized and the allocator fell through to recompute.
 
 ---
 
@@ -44,7 +44,15 @@ Verify by watching the metric counters during a provocation run: if swap-out cou
 
 ### 2.1 Artefact A — overcommit workload (reference recipe)
 
-Force preemption by lowering `max-num-seqs` well below the exercise-02 Pareto setpoint while raising concurrent client count. Do **not** overcommit by raising RPS alone — it conflates prefill cost with admission pressure.
+Force preemption by *increasing KV pressure on the running set* so the engine can't keep every admitted sequence resident. Lowering `--max-num-seqs` alone does **not** work: when the active sequences fit in the KV pool, a lower seq cap only shifts additional clients into the waiting queue (`vllm:num_requests_waiting` rises) and actually *reduces* resident KV demand — the running sequences never need to be evicted. The only way to force the scheduler to preempt is to make the KV pool too small for the running set itself.
+
+Three levers that actually raise KV pressure (compose them):
+
+1. **Long outputs** — small-`max_tokens` requests retire quickly and don't accumulate KV; a KV-stressing workload samples output lengths heavily into the P95/P99 bucket so each resident sequence holds thousands of decoded tokens' worth of KV.
+2. **Keep `--max-num-seqs` high** — leave it at or near the exercise-02 pinned value so the engine admits sequences up to the *KV* ceiling, not the running-set ceiling. The natural KV pressure then forces evictions.
+3. **Smaller KV pool** — set `--gpu-memory-utilization` lower (e.g. 0.80) so the KV pool is smaller relative to each sequence's footprint; for swap-mode runs pair with a moderate `--swap-space` so preempted KV has somewhere to land.
+
+Do **not** overcommit by raising RPS alone — it conflates prefill cost with admission pressure.
 
 Worked config (adapt model / size to learner's hardware):
 
@@ -52,26 +60,32 @@ Worked config (adapt model / size to learner's hardware):
 # Engine launch (swap-mode run)
 vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --max-model-len 8192 \
-  --max-num-seqs 16 \
+  --max-num-seqs 128 \                # kept high so KV pressure (not seq cap) bounds admission
   --max-num-batched-tokens 8192 \
   --enable-chunked-prefill \
+  --preemption-mode swap \            # explicit policy — do NOT rely on `--swap-space` to select the mode
   --swap-space 16 \
-  --gpu-memory-utilization 0.92 \
+  --gpu-memory-utilization 0.80 \     # tighter KV pool → earlier preemption on the running set
   --port 8001
 
 # Load generator (reusing exercise-02 load_gen.py, extended per Artefact A of exercise 03
-# so prompt-length is bucketed short/long).
+# so prompt-length is bucketed short/long and output-length is weighted into the P95/P99
+# bucket; long outputs are what keeps each resident sequence's KV footprint large enough
+# for the pool to saturate).
 python load_gen.py \
-  --rps 60 \              # 3-5x the running-set cap
+  --rps 20 \              # at the exercise-02 pinned admission rate — pressure comes from KV, not arrivals
   --duration-s 600 \      # 5 min warmup + 5 min measured
   --seed 42 \
   --base-url http://localhost:8001/v1 \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --out traces/run-swap.csv
 
-# At t=180s start a 60s burst of long-prompt-only traffic (second load_gen.py
-# process with weights=[0.00, 1.00] so every prompt is long).
+# At t=180s start a 60s burst of long-prompt + long-output traffic (second load_gen.py
+# process with prompt weights=[0.00, 1.00] and output weights biased into the P95/P99
+# bucket) to push the running-set KV past the pool ceiling.
 ```
+
+If preemption counters still don't move after a measured window, tighten `--gpu-memory-utilization` further (0.75, 0.70) or lengthen the P99 output bucket until the KV pool saturates. Document the final knob values alongside the swap-out counter reading.
 
 Document:
 
@@ -84,8 +98,8 @@ Document:
 
 **Run 1: swap mode.**
 
-- Launch with `--swap-space 16` (enough room for several evicted sequences' KV).
-- Preemption mode: swap. vLLM's default is "swap when space, else recompute"; **confirm mode by watching the swap-out counter**. If the counter does not move, swap space is undersized — raise it or acknowledge hybrid behaviour.
+- Launch with `--preemption-mode swap --swap-space 16` (explicit swap policy + enough CPU pool room for several evicted sequences' KV).
+- **Confirm mode by watching the swap-out counter**. If the counter does not move, either the policy flag didn't take effect (check `vllm serve --help` for the pinned release's spelling) or the swap pool is undersized and the allocator fell through to recompute — raise `--swap-space` and re-run.
 - Record for the 10-min run (5-min warmup + 5-min measured):
   - `vllm:num_preemptions_total` — overall preemption rate.
   - Swap-in / swap-out counters (exact names vary by release; verify against `/metrics`).  - `vllm:cpu_cache_usage_perc` (CPU swap-pool usage).
@@ -95,7 +109,7 @@ Document:
 
 **Run 2: recompute mode.**
 
-- Launch with `--swap-space 0` (or a very small value — verify that swap-out stays at zero).
+- Launch with `--preemption-mode recompute` (set the policy flag explicitly — do not rely on the pool-size fallback). Pair with `--swap-space 0` so there's no CPU pool at all; verify swap-out stays at zero.
 - Everything else identical: same seed, same workload spec, same measurement window.
 - Record the same metrics.
 
@@ -134,12 +148,17 @@ class TraceRow:
 
 **Break-even arithmetic** (chapter 04 intuition made concrete):
 
-- *Swap cost per sequence* ≈ `KV_bytes_per_token × prompt_tokens × 2 / PCIe_GB_per_s` (×2 for round-trip: out and in). For an 8B model at bf16 the KV per token is on the order of 128 KB — verify against the model's architecture and attention head layout for your deployment.- *Recompute cost per sequence* ≈ `prefill_time_per_token × prompt_tokens`; `prefill_time_per_token` is model- and hardware-specific — compute empirically from the engine's prefill-time metric or the load generator's TTFT for cold requests.
-- *Break-even*: solve `swap_cost(L) = recompute_cost(L)` for prompt length `L`. If PCIe bandwidth is 50 GB/s (PCIe Gen4 x16 effective), KV ≈ 128 KB/token, and prefill ≈ 0.5 ms/token on this model+hw, the break-even is roughly `L* ≈ (2 × 128 KB) / (50 GB/s × 0.5 ms) ≈ 1024 tokens`. **This arithmetic is illustrative** — use it as a template, substitute the learner's measured values.
+Both costs depend on prompt length `L`, but not in the same way — and the two length-dependencies are what produce a break-even. If both costs were purely linear in `L`, the equation `swap_cost(L) = recompute_cost(L)` would reduce to a constant ratio and `L` would cancel; there would be no break-even. The usable cost models must capture the real non-linearities: swap has a per-preemption *fixed* setup cost (block-manager bookkeeping, PCIe transaction setup) on top of its per-token transfer, and recompute's prefill has a quadratic term from attention over the restored prompt on top of its per-token throughput.
+
+- *Swap cost per sequence* ≈ `s0 + α × L`, where `α ≈ KV_bytes_per_token × 2 / PCIe_GB_per_s` (×2 for round-trip: out and in) and `s0` is the fixed per-preemption setup. For an 8B model at bf16 the KV per token is on the order of 128 KB; on PCIe Gen4 x16 (≈ 50 GB/s effective) that gives `α ≈ 2 × 128 KB / 50 GB/s ≈ 0.005 ms/token`. The fixed term `s0` is measured empirically from the preemption traces — on modern hardware with chunked-prefill scheduling it typically sits in the 100–200 ms range.
+- *Recompute cost per sequence* ≈ `β × L + γ × L²`, where the linear term tracks per-token prefill throughput and the quadratic term captures attention cost over the restored prompt. Both coefficients are model- and hardware-specific — fit them to two or more measured prefill points at distinct prompt lengths (the engine's prefill-time metric or the load generator's TTFT for cold requests).
+- *Break-even*: solve `s0 + α × L = β × L + γ × L²` for prompt length `L`. Rewrite as `γ L² + (β − α) L − s0 = 0` and take the positive root.
+
+**Substituting the measured values from the table above** — swap at ~180 ms for a 2k-token sequence fits `s0 ≈ 170 ms`, `α ≈ 0.005 ms/token`; recompute at ~90 ms for 500 tokens and ~1400 ms for 4000 tokens fits `β ≈ 0.156 ms/token`, `γ ≈ 4.9×10⁻⁵ ms/token²` (two-point fit — keep the linear and quadratic components labelled so the reader can see the quadratic growing to dominate at long context). Plugging in, `4.9×10⁻⁵ L² + 0.151 L − 170 = 0`, giving a positive root at **L\* ≈ 880 tokens** for this model + hardware. Below L\*, the fixed swap-setup cost dominates and recompute wins; above L\*, the quadratic attention term dominates and swap wins. **The coefficient values are illustrative** — the method is to fit the two curves to the learner's measured points and report `L*` as the root.
 
 **Worked verdict** (one paragraph, template):
 
-> For this workload (80/20 short/long, 8B model, single H100) on this hardware, the break-even is ~1200 tokens (measured, see above). Our long-prompt bucket sits at P50 ≈ 500 tokens and P95 ≈ 5000 tokens — the bimodal distribution. **Recommendation:** prefer *swap mode* when `--swap-space` can accommodate 3–5 evicted sequences' KV (≈ 16 GB per worker here), because long-prompt preemptions pay back the PCIe cost; fall back to recompute when swap space is constrained. Preemption rate at the exercise-02 setpoint is only ~0.3%, so the policy-pick blast radius is small, but the long-prompt restore-TTFT savings matter for the tail users. Pin **swap mode** with the verified `--swap-space 16`.
+> For this workload (80/20 short/long, 8B model, single H100) on this hardware, the fitted break-even is L\* ≈ 880 tokens (from the two-term quadratic fit above). Our long-prompt bucket sits at P50 ≈ 500 tokens and P95 ≈ 5000 tokens — the bimodal distribution. **Recommendation:** prefer *swap mode* (explicitly `--preemption-mode swap`) when `--swap-space` can accommodate 3–5 evicted sequences' KV (≈ 16 GB per worker here), because the P95-sized long-prompt preemptions sit well above L\* and their restore-TTFT savings pay back the PCIe cost; fall back to `--preemption-mode recompute` when swap space is constrained or when the workload shifts to a short-prompt majority. Preemption rate at the exercise-02 setpoint is only ~0.2%, so the policy-pick blast radius is small, but the long-prompt restore-TTFT savings matter for the tail users. Pin **`--preemption-mode swap`** with the verified `--swap-space 16`.
 
 The learner's verdict must name a specific break-even number (or a defensible range) and defend it against *their* measured values, not against this solution's placeholders. "It depends" fails the rubric.
 
