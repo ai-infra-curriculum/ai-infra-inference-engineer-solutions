@@ -68,7 +68,7 @@ args=(
 
 case "$MODE" in
   prefix-on)   args+=(--enable-prefix-caching) ;;
-  prefix-off)  : ;;                                      # flag omitted = disabled
+  prefix-off)  args+=(--no-enable-prefix-caching) ;;     # V1 enables it by default; disable explicitly
   *) echo "usage: $0 {prefix-on|prefix-off}" >&2; exit 2 ;;
 esac
 
@@ -209,6 +209,7 @@ retrieved context destroys the hit rate.
 
 ```python
 import argparse, asyncio, aiohttp, json, time, statistics
+from collections import defaultdict
 
 async def one(session, url, payload):
     t0 = time.perf_counter()
@@ -220,6 +221,15 @@ async def one(session, url, payload):
         total = time.perf_counter() - t0
     return first_byte, total
 
+def build_payload(r, model):
+    payload = {"model": model, "stream": True,
+               "max_tokens": r.get("max_tokens", 128)}
+    if "messages" in r:
+        payload["messages"] = r["messages"]
+    else:
+        payload["messages"] = [{"role": "user", "content": r["prompt"]}]
+    return payload
+
 async def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--url", required=True)
@@ -229,18 +239,29 @@ async def main():
     args = ap.parse_args()
 
     reqs = [json.loads(l) for l in open(args.jsonl)]
+    # Group by session so later turns wait on their predecessors; preserve the
+    # file's turn order within each session. Non-chat rows (no session_id) each
+    # get their own group so they run with full concurrency.
+    groups = defaultdict(list)
+    for i, r in enumerate(reqs):
+        key = r.get("session_id", f"_solo_{i}")
+        groups[key].append(r)
+
     sem = asyncio.Semaphore(args.concurrency)
+    results = [None] * len(reqs)
+    # Map each request back to its index in the input order so results align.
+    index_of = {id(r): i for i, r in enumerate(reqs)}
+
     async with aiohttp.ClientSession() as session:
-        async def run(r):
-            async with sem:
-                payload = {"model": args.model, "stream": True,
-                           "max_tokens": r.get("max_tokens", 128)}
-                if "messages" in r:
-                    payload["messages"] = r["messages"]
-                else:
-                    payload["messages"] = [{"role": "user", "content": r["prompt"]}]
-                return await one(session, args.url, payload)
-        results = await asyncio.gather(*[run(r) for r in reqs])
+        async def run_session(rs):
+            # Sequential within a session: turn k+1 only starts after turn k
+            # returns, so prefix lookups see the prior turn's cached KV.
+            for r in rs:
+                async with sem:
+                    results[index_of[id(r)]] = await one(
+                        session, args.url, build_payload(r, args.model))
+
+        await asyncio.gather(*[run_session(rs) for rs in groups.values()])
 
     ttfts = sorted(x[0] for x in results if x[0])
     print(f"n={len(results)}  ttft p50={ttfts[len(ttfts)//2]:.3f}s "
@@ -269,10 +290,14 @@ Hit rate = `prefix_cache_hits / prefix_cache_queries`.
 `harness/scrape_metrics.py`:
 
 ```python
-import argparse, re, urllib.request
+import argparse, pathlib, re, urllib.request
 
-def grab(url):
-    text = urllib.request.urlopen(url).read().decode()
+def grab(source):
+    # Accept either an http(s) URL or a local file path to a saved snapshot.
+    if source.startswith(("http://", "https://")):
+        text = urllib.request.urlopen(source).read().decode()
+    else:
+        text = pathlib.Path(source).read_text()
     out = {}
     for line in text.splitlines():
         if line.startswith("#") or " " not in line: continue
