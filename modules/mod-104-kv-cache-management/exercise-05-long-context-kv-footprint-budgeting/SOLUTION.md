@@ -40,8 +40,7 @@ A hypothetical workload the learner can reuse:
 | Target max context | 128 K tokens |
 | Target concurrency (batch) | 16 active sequences |
 | GPU | 1× 80 GiB-class accelerator (public spec class) |
-| Weights footprint | ~140 GiB FP16, ~70 GiB FP8, ~35 GiB INT4 (approximate from
-   `n_params * bytes_per_param`; verify for the exact checkpoint) |
+| Weights footprint | ~140 GiB FP16, ~70 GiB FP8, ~35 GiB INT4 (approximate from `n_params * bytes_per_param`; verify for the exact checkpoint) |
 
 Immediately: FP16 weights (~140 GiB) do not fit on one 80 GiB GPU. The exercise is
 posed deliberately with weights that only fit at FP8 or INT4 — this is realistic for
