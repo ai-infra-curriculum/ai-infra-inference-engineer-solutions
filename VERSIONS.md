@@ -10,3 +10,4 @@
 | 2026-11-06 | `fill-mod-101-inference-engineering-position-solutions` | `mod-101-inference-engineering-position` | Fill mod-101-inference-engineering-position module exercise solutions |
 | 2026-11-07 | `fill-mod-107-distributed-inference-topologies-solutions` | `mod-107-distributed-inference-topologies` | Fill mod-107-distributed-inference-topologies module exercise solutions |
 | 2026-11-07 | `fill-mod-108-speculative-decoding-ops-solutions` | `mod-108-speculative-decoding-ops` | Fill mod-108-speculative-decoding-ops module exercise solutions |
+| 2026-11-12 | `fill-mod-113-production-safety-and-rollouts-solutions` | `mod-113-production-safety-and-rollouts` | Fill mod-113-production-safety-and-rollouts module exercise solutions |
