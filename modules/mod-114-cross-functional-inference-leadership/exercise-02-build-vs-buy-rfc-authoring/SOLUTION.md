@@ -670,7 +670,7 @@ submission.
     simulated; dates present.
 12. **Appendix** has the cost spreadsheet / YAML and supporting
     exhibits (even if any individual exhibit is stubbed with a
-    `<!-- pending-verification --> `).
+    `<!-- pending-verification -->`).
 
 ## 14. Rubric / review checklist
 
