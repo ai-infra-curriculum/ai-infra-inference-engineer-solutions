@@ -40,8 +40,8 @@ allowed set.
 Three failure modes a free-form prompt hits regularly:
 
 1. **Invalid JSON.** Trailing commas, unquoted keys, truncation at
-   `max_tokens`, markdown fences around the JSON (``` ```json ```), prose
-   before or after the object.
+   `max_tokens`, markdown fences around the JSON (\`\`\`json ... \`\`\`),
+   prose before or after the object.
 2. **Valid JSON, wrong schema.** Extra chatty keys, missing required keys,
    wrong type (`"age": "thirty-two"` instead of `32`), enum string that is
    close-but-wrong (`"category": "Finance"` where the schema says
