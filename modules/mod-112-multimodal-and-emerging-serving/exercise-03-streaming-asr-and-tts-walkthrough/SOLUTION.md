@@ -371,7 +371,7 @@ Score each item 0 (missing), 1 (partial), 2 (fully correct). Passing: ≥ 10 / 1
 - Coqui-TTS project. https://github.com/coqui-ai/TTS — practitioner serving
   reference for the TTS half.
 - NVIDIA Riva. *Streaming ASR and TTS reference architecture.*
-  https://docs.nvidia.com/deeplearning/riva/ — alternative practitioner
+  http://web.archive.org/web/20220628223515/https://docs.nvidia.com/deeplearning/riva/ — alternative practitioner
   implementation at production scale; useful as a cross-reference for VAD and
   Opus wire framing.
 - OpenAI Realtime API. https://platform.openai.com/docs/guides/realtime —
